@@ -19,7 +19,7 @@ const { height } = Dimensions.get("window");
 
 export default function StepTwoScreen() {
   const handleSkip = () => {
-    console.log("Skip onboarding");
+    router.push("/(onboard)/step-three");
   };
 
   const handleNext = () => {

@@ -3,8 +3,10 @@ import PageDots from "@/components/PageDots";
 import { Colors } from "@/constants/Colors";
 import { BorderRadius, Spacing } from "@/constants/Spacing";
 import { Typography } from "@/constants/Typography";
+import { setOnboarded } from "@/lib/storage";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React from "react";
 import { Dimensions, StyleSheet, Text, View } from "react-native";
@@ -12,9 +14,10 @@ import { Dimensions, StyleSheet, Text, View } from "react-native";
 const { height } = Dimensions.get("window");
 
 export default function StepThreeScreen() {
-  const handleGetStarted = () => {
-    // Navigate to main app / dashboard
-    console.log("Get started!");
+  const handleGetStarted = async () => {
+    await setOnboarded();
+    router.dismissAll();
+    router.replace("/home");
   };
 
   return (

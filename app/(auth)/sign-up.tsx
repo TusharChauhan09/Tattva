@@ -62,13 +62,13 @@ export default function SignUpScreen() {
 
       if (createdSessionId) {
         await setActive!({ session: createdSessionId });
-        router.replace("/(onboard)");
+        router.replace("/");
         return;
       }
 
       if (ssoSignUp?.status === "complete" && ssoSignUp.createdSessionId) {
         await setActive!({ session: ssoSignUp.createdSessionId });
-        router.replace("/(onboard)");
+        router.replace("/");
         return;
       }
 
@@ -77,7 +77,7 @@ export default function SignUpScreen() {
           const result = await ssoSignUp.update({});
           if (result.status === "complete" && result.createdSessionId) {
             await setActive!({ session: result.createdSessionId });
-            router.replace("/(onboard)");
+            router.replace("/");
             return;
           }
         } catch (updateErr) {
@@ -91,7 +91,7 @@ export default function SignUpScreen() {
 
       if (ssoSignIn?.status === "complete" && ssoSignIn.createdSessionId) {
         await setActive!({ session: ssoSignIn.createdSessionId });
-        router.replace("/(onboard)");
+        router.replace("/");
         return;
       }
 

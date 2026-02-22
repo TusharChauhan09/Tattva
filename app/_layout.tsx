@@ -47,6 +47,7 @@ function RootNavigator() {
           name="(onboard)"
           options={{ animation: "slide_from_right" }}
         />
+        <Stack.Screen name="home" options={{ animation: "fade" }} />
       </Stack>
     </>
   );

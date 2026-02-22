@@ -53,7 +53,9 @@ export default function OTPInput({ length = 6, onComplete }: OTPInputProps) {
       {Array.from({ length }).map((_, index) => (
         <TextInput
           key={index}
-          ref={(ref) => (refs.current[index] = ref)}
+          ref={(ref) => {
+            refs.current[index] = ref;
+          }}
           style={[
             styles.box,
             focusedIndex === index && styles.boxFocused,

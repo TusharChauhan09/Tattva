@@ -19,8 +19,7 @@ const { height } = Dimensions.get("window");
 
 export default function StepOneScreen() {
   const handleSkip = () => {
-    // Skip all onboarding — go to main app
-    console.log("Skip onboarding");
+    router.push("/(onboard)/step-three");
   };
 
   const handleNext = () => {

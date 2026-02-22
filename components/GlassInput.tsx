@@ -4,24 +4,28 @@ import { Typography } from "@/constants/Typography";
 import { Ionicons } from "@expo/vector-icons";
 import React, { useState } from "react";
 import {
+  StyleProp,
   StyleSheet,
   Text,
   TextInput,
   TextInputProps,
   TouchableOpacity,
   View,
+  ViewStyle,
 } from "react-native";
 
 interface GlassInputProps extends TextInputProps {
   icon?: keyof typeof Ionicons.glyphMap;
   isPassword?: boolean;
   prefix?: string;
+  containerStyle?: StyleProp<ViewStyle>;
 }
 
 export default function GlassInput({
   icon,
   isPassword = false,
   prefix,
+  containerStyle,
   style,
   ...rest
 }: GlassInputProps) {
@@ -30,11 +34,15 @@ export default function GlassInput({
 
   return (
     <View
-      style={[styles.container, isFocused && styles.containerFocused, style]}
+      style={[
+        styles.container,
+        isFocused && styles.containerFocused,
+        containerStyle,
+      ]}
     >
       {icon && (
         <Ionicons
-          name={icon}
+          name={icon as any}
           size={20}
           color={isFocused ? Colors.accentBlue : Colors.textTertiary}
           style={styles.icon}
@@ -42,11 +50,17 @@ export default function GlassInput({
       )}
       {prefix && <Text style={styles.prefix}>{prefix}</Text>}
       <TextInput
-        style={styles.input}
+        style={[styles.input, style]}
         placeholderTextColor={Colors.textTertiary}
         secureTextEntry={isPassword && !showPassword}
-        onFocus={() => setIsFocused(true)}
-        onBlur={() => setIsFocused(false)}
+        onFocus={(e) => {
+          setIsFocused(true);
+          rest.onFocus?.(e);
+        }}
+        onBlur={(e) => {
+          setIsFocused(false);
+          rest.onBlur?.(e);
+        }}
         selectionColor={Colors.accentBlue}
         {...rest}
       />
@@ -54,6 +68,7 @@ export default function GlassInput({
         <TouchableOpacity
           onPress={() => setShowPassword(!showPassword)}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          activeOpacity={0.7}
         >
           <Ionicons
             name={showPassword ? "eye-off-outline" : "eye-outline"}

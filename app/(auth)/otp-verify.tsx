@@ -71,7 +71,7 @@ export default function OTPVerifyScreen() {
 
         if (result.status === "complete") {
           await setSignInActive({ session: result.createdSessionId });
-          router.replace("/(onboard)");
+          router.replace("/");
         } else {
           console.error(JSON.stringify(result, null, 2));
           setError("Verification could not be completed. Please try again.");
@@ -85,7 +85,7 @@ export default function OTPVerifyScreen() {
 
         if (result.status === "complete") {
           await setSignUpActive({ session: result.createdSessionId });
-          router.replace("/(onboard)");
+          router.replace("/");
         } else {
           console.error(JSON.stringify(result, null, 2));
           setError("Verification could not be completed. Please try again.");
