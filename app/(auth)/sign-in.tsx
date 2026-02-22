@@ -5,9 +5,12 @@ import GradientButton from "@/components/GradientButton";
 import { Colors } from "@/constants/Colors";
 import { Spacing } from "@/constants/Spacing";
 import { Typography } from "@/constants/Typography";
+import { useSignIn, useSSO } from "@clerk/clerk-expo";
+import * as AuthSession from "expo-auth-session";
 import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import React, { useState } from "react";
+import * as WebBrowser from "expo-web-browser";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -18,24 +21,135 @@ import {
   View,
 } from "react-native";
 
+// Handle any pending auth sessions
+WebBrowser.maybeCompleteAuthSession();
+
 export default function SignInScreen() {
+  const { signIn, setActive, isLoaded } = useSignIn();
+  const { startSSOFlow } = useSSO();
+
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const handleGoogleSignIn = () => {
-    console.log("Google Sign In");
-  };
+  // Preload browser on Android for faster OAuth
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    void WebBrowser.warmUpAsync();
+    return () => {
+      void WebBrowser.coolDownAsync();
+    };
+  }, []);
 
-  const handleSignIn = () => {
-    // Navigate to onboarding or main app after login
-    router.replace("/(onboard)");
-  };
+  const handleGoogleSignIn = useCallback(async () => {
+    try {
+      setError("");
+      const redirectUrl = AuthSession.makeRedirectUri({
+        scheme: "fitness",
+        path: "/(auth)/sign-in",
+      });
+
+      const {
+        createdSessionId,
+        setActive: setActiveSession,
+        signIn: ssoSignIn,
+        signUp: ssoSignUp,
+      } = await startSSOFlow({
+        strategy: "oauth_google",
+        redirectUrl,
+      });
+
+      if (createdSessionId) {
+        await setActiveSession!({ session: createdSessionId });
+        router.replace("/(onboard)");
+        return;
+      }
+
+      if (ssoSignUp?.status === "complete" && ssoSignUp.createdSessionId) {
+        await setActiveSession!({ session: ssoSignUp.createdSessionId });
+        router.replace("/(onboard)");
+        return;
+      }
+
+      if (ssoSignUp?.status === "missing_requirements") {
+        try {
+          const result = await ssoSignUp.update({});
+          if (result.status === "complete" && result.createdSessionId) {
+            await setActiveSession!({ session: result.createdSessionId });
+            router.replace("/(onboard)");
+            return;
+          }
+        } catch (updateErr) {
+          console.log("Could not auto-complete sign-up:", updateErr);
+        }
+
+        const fields = ssoSignUp.missingFields?.join(", ") || "unknown fields";
+        setError(`Google sign-in requires additional info: ${fields}.`);
+        return;
+      }
+
+      if (ssoSignIn?.status === "complete" && ssoSignIn.createdSessionId) {
+        await setActiveSession!({ session: ssoSignIn.createdSessionId });
+        router.replace("/(onboard)");
+        return;
+      }
+
+      setError("Could not complete Google sign-in. Please try again.");
+    } catch (err: any) {
+      console.error("Google SSO error:", JSON.stringify(err, null, 2));
+      const message =
+        err?.errors?.[0]?.longMessage ||
+        err?.errors?.[0]?.message ||
+        "Google sign in failed. Please try again.";
+      setError(message);
+    }
+  }, [startSSOFlow]);
+
+  const handleSendOTP = useCallback(async () => {
+    if (!isLoaded) return;
+
+    setLoading(true);
+    setError("");
+
+    try {
+      // Start sign-in with email
+      const { supportedFirstFactors } = await signIn.create({
+        identifier: email,
+      });
+
+      // Find the email_code factor
+      const emailFactor = supportedFirstFactors?.find(
+        (f: any) => f.strategy === "email_code",
+      );
+
+      if (emailFactor && "emailAddressId" in emailFactor) {
+        await signIn.prepareFirstFactor({
+          strategy: "email_code",
+          emailAddressId: emailFactor.emailAddressId,
+        });
+
+        router.push({
+          pathname: "/(auth)/otp-verify",
+          params: { email, mode: "sign-in" },
+        });
+      } else {
+        setError("Email sign-in is not available. Please sign up first.");
+      }
+    } catch (err: any) {
+      const message =
+        err?.errors?.[0]?.longMessage ||
+        err?.errors?.[0]?.message ||
+        "Could not send verification code. Please try again.";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }, [isLoaded, signIn, email]);
 
   return (
     <View style={styles.screen}>
       <StatusBar style="light" />
 
-      {/* Decorative background glows */}
       <View style={styles.bgGlow1} />
       <View style={styles.bgGlow2} />
       <View style={styles.bgGlow3} />
@@ -67,12 +181,11 @@ export default function SignInScreen() {
 
             <View style={styles.spacerMd} />
 
-            {/* Google Login */}
             <GoogleButton onPress={handleGoogleSignIn} />
 
             <Divider />
 
-            {/* Email & Password */}
+            {/* Email */}
             <GlassInput
               icon="mail-outline"
               placeholder="Email Address"
@@ -82,25 +195,17 @@ export default function SignInScreen() {
               autoCapitalize="none"
             />
 
-            <GlassInput
-              icon="lock-closed-outline"
-              placeholder="Password"
-              value={password}
-              onChangeText={setPassword}
-              isPassword
-            />
+            {error !== "" && <Text style={styles.errorText}>{error}</Text>}
 
-            {/* Forgot Password */}
-            <TouchableOpacity activeOpacity={0.7} style={styles.forgotWrapper}>
-              <Text style={styles.forgotText}>Forgot Password?</Text>
-            </TouchableOpacity>
-
-            {/* Sign In Button */}
             <View style={styles.buttonWrapper}>
-              <GradientButton title="Log In" onPress={handleSignIn} />
+              <GradientButton
+                title="Send OTP"
+                onPress={handleSendOTP}
+                loading={loading}
+                disabled={!email}
+              />
             </View>
 
-            {/* Toggle to Sign Up */}
             <View style={styles.toggleWrapper}>
               <Text style={styles.toggleText}>Don't have an account? </Text>
               <TouchableOpacity
@@ -155,7 +260,6 @@ const styles = StyleSheet.create({
     paddingTop: 90,
     paddingBottom: Spacing.xxxl,
   },
-  // Logo
   logoSection: {
     alignItems: "center",
     marginBottom: Spacing.xxl,
@@ -181,7 +285,6 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     textAlign: "center",
   },
-  // Form
   formSection: {
     gap: Spacing.base,
   },
@@ -198,13 +301,10 @@ const styles = StyleSheet.create({
   spacerMd: {
     height: Spacing.sm,
   },
-  forgotWrapper: {
-    alignSelf: "flex-end",
-    marginTop: -Spacing.xs,
-  },
-  forgotText: {
+  errorText: {
     ...Typography.bodySmall,
-    color: Colors.textLink,
+    color: Colors.error,
+    textAlign: "center",
   },
   buttonWrapper: {
     marginTop: Spacing.sm,

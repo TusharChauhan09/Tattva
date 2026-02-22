@@ -3,10 +3,11 @@ import OTPInput from "@/components/OTPInput";
 import { Colors } from "@/constants/Colors";
 import { Spacing } from "@/constants/Spacing";
 import { Typography } from "@/constants/Typography";
+import { useSignIn, useSignUp } from "@clerk/clerk-expo";
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Dimensions,
   StyleSheet,
@@ -18,9 +19,28 @@ import {
 const { width } = Dimensions.get("window");
 
 export default function OTPVerifyScreen() {
+  const {
+    signUp,
+    setActive: setSignUpActive,
+    isLoaded: isSignUpLoaded,
+  } = useSignUp();
+  const {
+    signIn,
+    setActive: setSignInActive,
+    isLoaded: isSignInLoaded,
+  } = useSignIn();
+  const { email, mode } = useLocalSearchParams<{
+    email: string;
+    mode: string;
+  }>();
+
+  const isSignIn = mode === "sign-in";
+
   const [timer, setTimer] = useState(30);
   const [canResend, setCanResend] = useState(false);
   const [otpCode, setOtpCode] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     if (timer > 0) {
@@ -33,19 +53,107 @@ export default function OTPVerifyScreen() {
     }
   }, [timer]);
 
-  const handleVerify = () => {
-    console.log("Verifying OTP:", otpCode);
-    // Navigate to onboarding after successful verification
-    router.replace("/(onboard)");
-  };
+  const handleVerify = useCallback(async () => {
+    if (isSignIn && !isSignInLoaded) return;
+    if (!isSignIn && !isSignUpLoaded) return;
 
-  const handleResend = () => {
-    if (canResend) {
+    setLoading(true);
+    setError("");
+
+    try {
+      if (isSignIn) {
+        if (!signIn) return;
+        // Sign-in: verify with first factor (email code)
+        const result = await signIn.attemptFirstFactor({
+          strategy: "email_code",
+          code: otpCode,
+        });
+
+        if (result.status === "complete") {
+          await setSignInActive({ session: result.createdSessionId });
+          router.replace("/(onboard)");
+        } else {
+          console.error(JSON.stringify(result, null, 2));
+          setError("Verification could not be completed. Please try again.");
+        }
+      } else {
+        if (!signUp) return;
+        // Sign-up: verify email address
+        const result = await signUp.attemptEmailAddressVerification({
+          code: otpCode,
+        });
+
+        if (result.status === "complete") {
+          await setSignUpActive({ session: result.createdSessionId });
+          router.replace("/(onboard)");
+        } else {
+          console.error(JSON.stringify(result, null, 2));
+          setError("Verification could not be completed. Please try again.");
+        }
+      }
+    } catch (err: any) {
+      const message =
+        err?.errors?.[0]?.longMessage ||
+        err?.errors?.[0]?.message ||
+        "Invalid verification code. Please try again.";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }, [
+    isSignIn,
+    isSignInLoaded,
+    isSignUpLoaded,
+    signIn,
+    signUp,
+    setSignInActive,
+    setSignUpActive,
+    otpCode,
+  ]);
+
+  const handleResend = useCallback(async () => {
+    if (!canResend) return;
+
+    try {
+      if (isSignIn) {
+        if (!isSignInLoaded || !signIn) return;
+        // Re-send sign-in email OTP
+        const { supportedFirstFactors } = await signIn.create({
+          identifier: email,
+        });
+        const emailFactor = supportedFirstFactors?.find(
+          (f: any) => f.strategy === "email_code",
+        );
+        if (emailFactor && "emailAddressId" in emailFactor) {
+          await signIn.prepareFirstFactor({
+            strategy: "email_code",
+            emailAddressId: emailFactor.emailAddressId,
+          });
+        }
+      } else {
+        if (!isSignUpLoaded || !signUp) return;
+        // Re-send sign-up email OTP
+        await signUp.prepareEmailAddressVerification({
+          strategy: "email_code",
+        });
+      }
       setTimer(30);
       setCanResend(false);
-      console.log("Resending OTP...");
+      setError("");
+    } catch (err: any) {
+      const message =
+        err?.errors?.[0]?.message || "Could not resend code. Please try again.";
+      setError(message);
     }
-  };
+  }, [
+    canResend,
+    isSignIn,
+    isSignInLoaded,
+    isSignUpLoaded,
+    signIn,
+    signUp,
+    email,
+  ]);
 
   const formatTimer = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -53,11 +161,17 @@ export default function OTPVerifyScreen() {
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
+  // Mask the email for display (e.g. t***r@gmail.com)
+  const maskedEmail = email
+    ? email.replace(/^(.)(.*)(@.*)$/, (_, first, middle, domain) => {
+        return `${first}${"*".repeat(Math.min(middle.length, 4))}${domain}`;
+      })
+    : "your email";
+
   return (
     <View style={styles.screen}>
       <StatusBar style="light" />
 
-      {/* Background glow */}
       <View style={styles.bgGlow1} />
       <View style={styles.bgGlow2} />
 
@@ -86,10 +200,10 @@ export default function OTPVerifyScreen() {
 
         {/* Title */}
         <View style={styles.titleSection}>
-          <Text style={styles.title}>Verify Your Phone</Text>
+          <Text style={styles.title}>Verify Your Email</Text>
           <Text style={styles.subtitle}>
             We've sent a 6-digit code to{"\n"}
-            <Text style={styles.phoneNumber}>+91 98XXXXX90</Text>
+            <Text style={styles.emailText}>{maskedEmail}</Text>
           </Text>
         </View>
 
@@ -97,6 +211,9 @@ export default function OTPVerifyScreen() {
         <View style={styles.otpSection}>
           <OTPInput length={6} onComplete={(code) => setOtpCode(code)} />
         </View>
+
+        {/* Error message */}
+        {error !== "" && <Text style={styles.errorText}>{error}</Text>}
 
         {/* Timer & Resend */}
         <View style={styles.resendSection}>
@@ -121,6 +238,7 @@ export default function OTPVerifyScreen() {
             title="Verify"
             onPress={handleVerify}
             disabled={otpCode.length !== 6}
+            loading={loading}
           />
         </View>
       </View>
@@ -230,12 +348,18 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 24,
   },
-  phoneNumber: {
+  emailText: {
     color: Colors.textPrimary,
     fontWeight: "600",
   },
   otpSection: {
     marginBottom: Spacing.xl,
+  },
+  errorText: {
+    ...Typography.bodySmall,
+    color: Colors.error,
+    textAlign: "center",
+    marginBottom: Spacing.sm,
   },
   resendSection: {
     alignItems: "center",

@@ -5,9 +5,12 @@ import GradientButton from "@/components/GradientButton";
 import { Colors } from "@/constants/Colors";
 import { Spacing } from "@/constants/Spacing";
 import { Typography } from "@/constants/Typography";
+import { useSignUp, useSSO } from "@clerk/clerk-expo";
+import * as AuthSession from "expo-auth-session";
 import { router } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import React, { useState } from "react";
+import * as WebBrowser from "expo-web-browser";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
@@ -18,26 +21,128 @@ import {
   View,
 } from "react-native";
 
+// Handle any pending auth sessions
+WebBrowser.maybeCompleteAuthSession();
+
 export default function SignUpScreen() {
+  const { signUp, isLoaded } = useSignUp();
+  const { startSSOFlow } = useSSO();
+
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [phone, setPhone] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  const handleGoogleSignUp = () => {
-    console.log("Google Sign Up");
-  };
+  // Preload browser on Android for faster OAuth
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+    void WebBrowser.warmUpAsync();
+    return () => {
+      void WebBrowser.coolDownAsync();
+    };
+  }, []);
 
-  const handleCreateAccount = () => {
-    // Navigate to OTP verification
-    router.push("/(auth)/otp-verify");
-  };
+  const handleGoogleSignUp = useCallback(async () => {
+    try {
+      setError("");
+      const redirectUrl = AuthSession.makeRedirectUri({
+        scheme: "fitness",
+        path: "/(auth)/sign-up",
+      });
+
+      const {
+        createdSessionId,
+        setActive,
+        signIn: ssoSignIn,
+        signUp: ssoSignUp,
+      } = await startSSOFlow({
+        strategy: "oauth_google",
+        redirectUrl,
+      });
+
+      if (createdSessionId) {
+        await setActive!({ session: createdSessionId });
+        router.replace("/(onboard)");
+        return;
+      }
+
+      if (ssoSignUp?.status === "complete" && ssoSignUp.createdSessionId) {
+        await setActive!({ session: ssoSignUp.createdSessionId });
+        router.replace("/(onboard)");
+        return;
+      }
+
+      if (ssoSignUp?.status === "missing_requirements") {
+        try {
+          const result = await ssoSignUp.update({});
+          if (result.status === "complete" && result.createdSessionId) {
+            await setActive!({ session: result.createdSessionId });
+            router.replace("/(onboard)");
+            return;
+          }
+        } catch (updateErr) {
+          console.log("Could not auto-complete sign-up:", updateErr);
+        }
+
+        const fields = ssoSignUp.missingFields?.join(", ") || "unknown fields";
+        setError(`Google sign-up requires additional info: ${fields}.`);
+        return;
+      }
+
+      if (ssoSignIn?.status === "complete" && ssoSignIn.createdSessionId) {
+        await setActive!({ session: ssoSignIn.createdSessionId });
+        router.replace("/(onboard)");
+        return;
+      }
+
+      setError("Could not complete Google sign-up. Please try again.");
+    } catch (err: any) {
+      console.error("Google SSO error:", JSON.stringify(err, null, 2));
+      const message =
+        err?.errors?.[0]?.longMessage ||
+        err?.errors?.[0]?.message ||
+        "Google sign up failed. Please try again.";
+      setError(message);
+    }
+  }, [startSSOFlow]);
+
+  const handleCreateAccount = useCallback(async () => {
+    if (!isLoaded) return;
+
+    setLoading(true);
+    setError("");
+
+    try {
+      // Create sign-up with email and name
+      await signUp.create({
+        emailAddress: email,
+        firstName: fullName.split(" ")[0],
+        lastName: fullName.split(" ").slice(1).join(" ") || undefined,
+      });
+
+      // Send email verification code
+      await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
+
+      // Navigate to OTP screen
+      router.push({
+        pathname: "/(auth)/otp-verify",
+        params: { email, mode: "sign-up" },
+      });
+    } catch (err: any) {
+      const message =
+        err?.errors?.[0]?.longMessage ||
+        err?.errors?.[0]?.message ||
+        "Could not create account. Please try again.";
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }, [isLoaded, signUp, email, fullName]);
 
   return (
     <View style={styles.screen}>
       <StatusBar style="light" />
 
-      {/* Decorative background glows */}
       <View style={styles.bgGlow1} />
       <View style={styles.bgGlow2} />
       <View style={styles.bgGlow3} />
@@ -69,12 +174,10 @@ export default function SignUpScreen() {
 
             <View style={styles.spacerMd} />
 
-            {/* Google Sign Up */}
             <GoogleButton onPress={handleGoogleSignUp} />
 
             <Divider />
 
-            {/* Input Fields */}
             <GlassInput
               icon="person-outline"
               placeholder="Full Name"
@@ -92,32 +195,17 @@ export default function SignUpScreen() {
               autoCapitalize="none"
             />
 
-            <GlassInput
-              icon="lock-closed-outline"
-              placeholder="Password"
-              value={password}
-              onChangeText={setPassword}
-              isPassword
-            />
+            {error !== "" && <Text style={styles.errorText}>{error}</Text>}
 
-            <GlassInput
-              icon="call-outline"
-              prefix="+91"
-              placeholder="Phone Number"
-              value={phone}
-              onChangeText={setPhone}
-              keyboardType="phone-pad"
-            />
-
-            {/* Create Account Button */}
             <View style={styles.buttonWrapper}>
               <GradientButton
                 title="Create Account"
                 onPress={handleCreateAccount}
+                loading={loading}
+                disabled={!fullName || !email}
               />
             </View>
 
-            {/* Toggle to Sign In */}
             <View style={styles.toggleWrapper}>
               <Text style={styles.toggleText}>Already have an account? </Text>
               <TouchableOpacity
@@ -172,7 +260,6 @@ const styles = StyleSheet.create({
     paddingTop: 80,
     paddingBottom: Spacing.xxxl,
   },
-  // Logo
   logoSection: {
     alignItems: "center",
     marginBottom: Spacing.xl,
@@ -198,7 +285,6 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     textAlign: "center",
   },
-  // Form
   formSection: {
     gap: Spacing.base,
   },
@@ -214,6 +300,11 @@ const styles = StyleSheet.create({
   },
   spacerMd: {
     height: Spacing.xs,
+  },
+  errorText: {
+    ...Typography.bodySmall,
+    color: Colors.error,
+    textAlign: "center",
   },
   buttonWrapper: {
     marginTop: Spacing.sm,
